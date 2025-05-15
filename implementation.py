@@ -144,7 +144,7 @@ class Decoder(nn.Module):
     def __init__(
             self,
             target_vocab_size,
-            emebed_size,
+            embed_size,
             num_layers,
             heads,
             forward_expansion,
@@ -159,12 +159,12 @@ class Decoder(nn.Module):
 
         self.layers = nn.ModuleList(
             [
-                DecoderBlock(emebed_size, heads=heads, forward_expansion=forward_expansion, dropout=dropout, device=device)
+                DecoderBlock(embed_size, heads=heads, forward_expansion=forward_expansion, dropout=dropout, device=device)
             for _ in range(num_layers)
             ]
         )
         
-        self.fc_out = nn.Linear(emebed_size, target_vocab_size)
+        self.fc_out = nn.Linear(embed_size, target_vocab_size)
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, x, encoder_out, src_mask, target_mask):
@@ -176,7 +176,86 @@ class Decoder(nn.Module):
             x = layer(x, encoder_out, src_mask, target_mask)
 
         out = self.fc_out(x)
+        return out
 
 class Transformer(nn.Module):
-    pass
+    def __init__(
+        self,
+        src_vocab_size,
+        target_vocab_size,
+        source_pad_index,
+        target_pad_index,
+        embed_size = 256,
+        num_layers = 6,
+        forward_expansion = 4,
+        heads = 2,
+        dropout = 0,
+        device = 'cuda',
+        max_length = 100
+    ):
+        super(Transformer, self).__init__()
+        
+        self.encoder = Encoder(
+            src_vocab_size=src_vocab_size,
+            embed_size=embed_size,
+            num_layers=num_layers,
+            heads = heads,
+            device = device,
+            forward_expansion = forward_expansion,
+            dropout = dropout,
+            max_length = max_length,
+        )
+        
+        self.decoder = Decoder(
+            target_vocab_size=target_vocab_size,
+            embed_size=embed_size,
+            num_layers=num_layers,
+            heads=heads,
+            forward_expansion=forward_expansion,
+            dropout=dropout,
+            device=device,
+            max_length=max_length
+        )
+        
+        self.src_pad_index = source_pad_index
+        self.target_pad_index = target_pad_index
+        self.device = device
+        
+    
+    def make_src_mask(self, src):
+        src_mask = (src != self.src_pad_index).unsqueeze(1).unsqueeze(2)
+        # (N, 1, 1, src_length)
+        return src_mask.to(self.device)
+    
+    def make_target_mask(self, target):
+        N, target_length = target.shape
+        target_mask = torch.tril(torch.ones((target_length, target_length))).expand(
+            N, 1, target_length, target_length
+        )
+        return target_mask.to(self.device)
 
+    def forward(self, src, target):
+        src_mask = self.make_src_mask(src=src)
+        target_mask = self.make_target_mask(target=target)
+        enc_src = self.encoder(src, src_mask)
+        out = self.decoder(target, enc_src, src_mask, target_mask)
+        return out
+
+
+if __name__ == '__main__':
+    device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
+    
+    X = torch.tensor(
+        [
+            [1, 5, 6, 4, 3, 9, 5, 2, 0],
+            [1, 8, 7, 3, 4, 5, 6, 7, 2]
+        ]).to(
+            device
+        )
+        target = torch.tensor(
+            [
+                [1, 7, 4, 3, 5, 9, 2, 0],
+                [1, 5, 6, 2, 4, 7, 6, 2]
+            ]).to(
+            device
+        )
